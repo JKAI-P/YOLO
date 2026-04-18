@@ -5,14 +5,30 @@ if __name__ == "__main__":
     model = YOLO("yolo26n.pt")  # load a pretrained model (recommended for training)
 
     # Train the model
-    model.train (
+    model.train(
         data="datasets/Det-Fly.v6i.yolov/data.yaml",  # dataset.yaml path
         epochs=50,  # number of epochs to train for
-        patience=20,       # 20轮不提升就早停
-        imgsz=640,  # train image sizeuu
+        patience=20,  # 20轮不提升就早停
+        imgsz=640,  # train image size
         batch=8,  # total batch size for all GPUs
-        project="runs/train",  # save to project/nam/e
+        project="runs/train",  # save to project/name
         name="yolov26n",  # save to project/name
-        workers=1,  # number of dataloader workers
+        workers=4,  # number of dataloader workers (macOS可以适当提高)
         cache="ram",  # cache images for faster training
-    )5
+        optimizer="AdamW",  # 使用AdamW优化器，收敛更稳定
+        lr0=0.001,  # 初始学习率
+        lrf=0.01,  # 最终学习率衰减系数
+        weight_decay=0.0005,  # 权重衰减
+        hsv_h=0.015,  # 色调增强
+        hsv_s=0.7,  # 饱和度增强
+        hsv_v=0.4,  # 亮度增强
+        degrees=0.0,  # 旋转角度（飞行物检测不需要旋转）
+        translate=0.1,  # 平移增强
+        scale=0.5,  # 缩放增强
+        mosaic=1.0,  # Mosaic增强
+        mixup=0.0,  # Mixup增强（小目标不建议用）
+        copy_paste=0.0,  # Copy-paste增强
+        val=True,  # 每个epoch后验证
+        plots=True,  # 保存训练图表
+        exist_ok=False,  # 如果为True会覆盖已有实验
+    )
