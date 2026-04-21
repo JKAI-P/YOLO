@@ -7,14 +7,16 @@ if __name__ == "__main__":
     # Train the model
     model.train(
         data="datasets/Det-Fly.v6i.yolov/data.yaml",  # dataset.yaml path
-        epochs=50,  # number of epochs to train for
+        epochs=1,  # 先跑1轮确认流程跑通
         patience=20,  # 20轮不提升就早停
         imgsz=640,  # train image size
-        batch=8,  # total batch size for all GPUs
+        batch=16,  # 提高batch size，充分利用M1显存
+        device="mps",  # 使用 Mac M1 Pro 的 GPU 加速
         project="runs/train",  # save to project/name
-        name="yolov26n",  # save to project/name
-        workers=4,  # number of dataloader workers (macOS可以适当提高)
-        cache="ram",  # cache images for faster training
+        name="yolov26n_test",  # save to project/name
+        workers=4,  # Mac 上调试建议先设为0
+
+        cache="disk",
         optimizer="AdamW",  # 使用AdamW优化器，收敛更稳定
         lr0=0.001,  # 初始学习率
         lrf=0.01,  # 最终学习率衰减系数
@@ -22,7 +24,7 @@ if __name__ == "__main__":
         hsv_h=0.015,  # 色调增强
         hsv_s=0.7,  # 饱和度增强
         hsv_v=0.4,  # 亮度增强
-        degrees=0.0,  # 旋转角度（飞行物检测不需要旋转）
+        degrees=30.0,  # 旋转角度（飞行物检测不需要旋转）
         translate=0.1,  # 平移增强
         scale=0.5,  # 缩放增强
         mosaic=1.0,  # Mosaic增强
