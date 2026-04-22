@@ -1,36 +1,53 @@
 from ultralytics import YOLO
 
 if __name__ == "__main__":
-    # Load a model
-    model = YOLO("yolo26n.pt")  # load a pretrained model (recommended for training)
+    # Load IYUAV-Det model from custom YAML
+    model = YOLO("ultralytics/cfg/models/v8/yolov8-iyuav.yaml")
 
     # Train the model
     model.train(
         data="datasets/Det-Fly.v6i.yolov/data.yaml",  # dataset.yaml path
-        epochs=1,  # 先跑1轮确认流程跑通
-        patience=20,  # 20轮不提升就早停
-        imgsz=640,  # train image size
-        batch=16,  # 提高batch size，充分利用M1显存
-        device="mps",  # 使用 Mac M1 Pro 的 GPU 加速
-        project="runs/train",  # save to project/name
-        name="yolov26n_test",  # save to project/name
-        workers=4,  # Mac 上调试建议先设为0
+        epochs=300,  # total training epochs
+        patience=20,  # early stopping patience
+        imgsz=640,  # input image size
+        batch=16,  # batch size
+        device="0",  # CUDA GPU
+        project="runs/train",  # save directory
+        name="iyuav-det",  # experiment name
+        workers=8,
 
+        # Optimizer
+        optimizer="SGD",
+        lr0=0.01,  # initial learning rate
+        lrf=0.01,  # final learning rate factor (lr0 * lrf)
+        momentum=0.937,
+        weight_decay=0.0005,
+
+        # Loss - use SIoU for box loss
+        iou_type="SIoU",
+        box=7.5,
+        cls=0.5,
+        dfl=1.5,
+
+        # Data augmentation
+        hsv_h=0.015,
+        hsv_s=0.7,
+        hsv_v=0.4,
+        degrees=0.0,  # no rotation for UAV detection
+        translate=0.1,
+        scale=0.5,
+        mosaic=1.0,
+        mixup=0.1,  # light mixup
+        copy_paste=0.0,
+
+        # Warmup
+        warmup_epochs=3,
+        warmup_momentum=0.8,
+        warmup_bias_lr=0.1,
+
+        # Other
         cache="disk",
-        optimizer="AdamW",  # 使用AdamW优化器，收敛更稳定
-        lr0=0.001,  # 初始学习率
-        lrf=0.01,  # 最终学习率衰减系数
-        weight_decay=0.0005,  # 权重衰减
-        hsv_h=0.015,  # 色调增强
-        hsv_s=0.7,  # 饱和度增强
-        hsv_v=0.4,  # 亮度增强
-        degrees=30.0,  # 旋转角度（飞行物检测不需要旋转）
-        translate=0.1,  # 平移增强
-        scale=0.5,  # 缩放增强
-        mosaic=1.0,  # Mosaic增强
-        mixup=0.0,  # Mixup增强（小目标不建议用）
-        copy_paste=0.0,  # Copy-paste增强
-        val=True,  # 每个epoch后验证
-        plots=True,  # 保存训练图表
-        exist_ok=False,  # 如果为True会覆盖已有实验
+        val=True,
+        plots=True,
+        exist_ok=False,
     )

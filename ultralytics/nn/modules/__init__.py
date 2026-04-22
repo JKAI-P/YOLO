@@ -40,6 +40,7 @@ from .block import (
     C2f,
     C2fAttn,
     C2fCIB,
+    C2f_CBAM,
     C2fPSA,
     C3Ghost,
     C3k2,
@@ -75,6 +76,7 @@ from .conv import (
     LightConv,
     RepConv,
     SpatialAttention,
+    WeightedFuse,
 )
 from .head import (
     OBB,
@@ -134,6 +136,7 @@ __all__ = (
     "C2f",
     "C2fAttn",
     "C2fCIB",
+    "C2f_CBAM",
     "C2fPSA",
     "C3Ghost",
     "C3k2",
@@ -182,6 +185,7 @@ __all__ = (
     "TransformerBlock",
     "TransformerEncoderLayer",
     "TransformerLayer",
+    "WeightedFuse",
     "WorldDetect",
     "YOLOEDetect",
     "YOLOESegment",

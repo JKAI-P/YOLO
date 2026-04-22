@@ -1,0 +1,57 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# IYUAV-Det: Improved YOLOv8 for UAV Detection
+# Based on YOLOv8 with CBAM attention, BiFPN-style weighted fusion, and P2 small target detection layer
+
+# Parameters
+nc: 2 # number of classes (Bird, Drone)
+scales: # model compound scaling constants
+  # [depth, width, max_channels]
+  n: [0.33, 0.25, 1024] # IYUAV-Det-N
+  s: [0.33, 0.50, 1024] # IYUAV-Det-S
+  m: [0.67, 0.75, 768] # IYUAV-Det-M
+  l: [1.00, 1.00, 512] # IYUAV-Det-L
+
+# IYUAV-Det backbone (C2f + CBAM)
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4
+  - [-1, 3, C2f_CBAM, [128, True]] # 2
+  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8
+  - [-1, 6, C2f_CBAM, [256, True]] # 4
+  - [-1, 1, Conv, [512, 3, 2]] # 5-P4/16
+  - [-1, 6, C2f_CBAM, [512, True]] # 6
+  - [-1, 1, Conv, [1024, 3, 2]] # 7-P5/32
+  - [-1, 3, C2f_CBAM, [1024, True]] # 8
+  - [-1, 1, SPPF, [1024, 5]] # 9
+
+# IYUAV-Det head (FPN + PAN with weighted fusion + P2 detection)
+head:
+  # FPN top-down path
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 10
+  - [[-1, 6], 1, WeightedFuse, [1]] # 11 cat backbone P4
+  - [-1, 3, C2f, [512]] # 12
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 13
+  - [[-1, 4], 1, WeightedFuse, [1]] # 14 cat backbone P3
+  - [-1, 3, C2f, [256]] # 15 (P3/8-small)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 16
+  - [[-1, 2], 1, WeightedFuse, [1]] # 17 cat backbone P2
+  - [-1, 3, C2f, [128]] # 18 (P2/4-xsmall)
+
+  # PAN bottom-up path
+  - [-1, 1, Conv, [128, 3, 2]] # 19
+  - [[-1, 15], 1, WeightedFuse, [1]] # 20 cat head P3
+  - [-1, 3, C2f, [256]] # 21 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]] # 22
+  - [[-1, 12], 1, WeightedFuse, [1]] # 23 cat head P4
+  - [-1, 3, C2f, [512]] # 24 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]] # 25
+  - [[-1, 9], 1, WeightedFuse, [1]] # 26 cat head P5
+  - [-1, 3, C2f, [1024]] # 27 (P5/32-large)
+
+  - [[18, 21, 24, 27], 1, Detect, [nc]] # Detect(P2, P3, P4, P5)

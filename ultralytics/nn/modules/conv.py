@@ -8,6 +8,7 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 __all__ = (
     "CBAM",
@@ -24,6 +25,7 @@ __all__ = (
     "LightConv",
     "RepConv",
     "SpatialAttention",
+    "WeightedFuse",
 )
 
 
@@ -667,3 +669,41 @@ class Index(nn.Module):
             (torch.Tensor): Selected tensor.
         """
         return x[self.index]
+
+
+class WeightedFuse(nn.Module):
+    """BiFPN-style weighted feature concatenation with learnable fusion weights.
+
+    Applies fast normalized fusion from BiFPN: each input branch is multiplied by a
+    learnable weight (kept non-negative via ReLU), then normalized and concatenated.
+    This replaces simple Concat with weighted concatenation for better multi-scale
+    feature fusion.
+
+    References:
+        EfficientDet: Scalable and Efficient Object Detection (Tan et al., 2020)
+    """
+
+    def __init__(self, dimension=1, n=2, epsilon=1e-4):
+        """Initialize WeightedFuse module.
+
+        Args:
+            dimension (int): Dimension along which to concatenate tensors.
+            n (int): Number of input branches (learnable weights).
+            epsilon (float): Small value to avoid division by zero in normalization.
+        """
+        super().__init__()
+        self.d = dimension
+        self.epsilon = epsilon
+        self.weights = nn.Parameter(torch.ones(n, dtype=torch.float32))
+
+    def forward(self, x: list[torch.Tensor]):
+        """Apply weighted fusion and concatenation to input tensors.
+
+        Args:
+            x (list[torch.Tensor]): List of input tensors to fuse.
+
+        Returns:
+            (torch.Tensor): Fused tensor with weighted concatenation.
+        """
+        w = F.relu(self.weights)
+        return torch.cat([wi / (w.sum() + self.epsilon) * xi for wi, xi in zip(w, x)], self.d)

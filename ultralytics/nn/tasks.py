@@ -31,6 +31,7 @@ from ultralytics.nn.modules import (
     Bottleneck,
     BottleneckCSP,
     C2f,
+    C2f_CBAM,
     C2fAttn,
     C2fCIB,
     C2fPSA,
@@ -60,6 +61,7 @@ from ultralytics.nn.modules import (
     RepC3,
     RepConv,
     RepNCSPELAN4,
+    WeightedFuse,
     RepVGGDW,
     ResNetLayer,
     RTDETRDecoder,
@@ -1601,6 +1603,7 @@ def parse_model(d, ch, verbose=True):
             PSA,
             SCDown,
             C2fCIB,
+            C2f_CBAM,
             A2C2f,
         }
     )
@@ -1621,6 +1624,7 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             C2PSA,
             A2C2f,
+            C2f_CBAM,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
@@ -1672,6 +1676,9 @@ def parse_model(d, ch, verbose=True):
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+        elif m is WeightedFuse:
+            c2 = sum(ch[x] for x in f)
+            args = [1, len(f)]  # dimension=1, n=number of inputs
         elif m in frozenset(
             {
                 Detect,
