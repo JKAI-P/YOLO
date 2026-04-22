@@ -50,4 +50,6 @@ if __name__ == "__main__":
         val=True,
         plots=True,
         exist_ok=False,
+        amp=False,  # 禁用AMP检查，避免路径错误
+        verbose=True,  # 显示详细训练信息
     )
