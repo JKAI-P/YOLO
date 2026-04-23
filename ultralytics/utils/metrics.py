@@ -143,40 +143,28 @@ def bbox_iou(
         # angle cost
         s_cw = (b2_cx - b1_cx).abs()
         s_ch = (b2_cy - b1_cy).abs()
-        sigma = (s_cw.pow(2) + s_ch.pow(2) + eps) / c2
-        # 修复：避免对s_ch取sqrt导致NaN，改为直接使用s_ch/sigma.sqrt()
-        # 使用torch.where进行元素级条件判断，选择较短边作为分子以符合SIoU定义
+        # sin_alpha: choose the shorter side as numerator, condition on angle > 45°
         sin_alpha = torch.where(
             s_ch > s_cw,
             s_cw / (c2.sqrt() + eps),
             s_ch / (c2.sqrt() + eps),
         )
-        # clamp for numerical stability
         sin_alpha = sin_alpha.clamp(0, 1)
-        angle_cost = 1 - 2 * (sin_alpha - sin_alpha.pow(2))
+        # angle_cost = 2 * sin_alpha * cos_alpha (SIoU paper: Λ = sin(2α))
+        cos_alpha = (1 - sin_alpha.pow(2) + eps).sqrt()
+        angle_cost = 2 * sin_alpha * cos_alpha
         # distance cost
         rho_x = (s_cw / cw).pow(2)
         rho_y = (s_ch / ch).pow(2)
-        gamma = angle_cost - 2
-        # 限制gamma范围防止exp溢出，增加数值稳定性
-        gamma = gamma.clamp(-10, 0)  # SIoU论文中gamma应为负值
-        # 进一步限制rho防止极端情况
-        rho_x = rho_x.clamp(0, 10)
-        rho_y = rho_y.clamp(0, 10)
+        gamma = angle_cost - 2  # negative, convention matched with distance_cost formula
+        gamma = gamma.clamp(-10, 0)
         distance_cost = 2 - torch.exp(gamma * rho_x) - torch.exp(gamma * rho_y)
         # shape cost
         omiga_w = (w1 - w2).abs() / (w1.maximum(w2) + eps)
         omiga_h = (h1 - h2).abs() / (h1.maximum(h2) + eps)
-        # clamp omiga防止exp溢出
-        omiga_w = omiga_w.clamp(0, 10)
-        omiga_h = omiga_h.clamp(0, 10)
         shape_cost = (1 - torch.exp(-omiga_w)) ** 2 + (1 - torch.exp(-omiga_h)) ** 2
-        
-        # 最终返回值保护：确保不会出现NaN或Inf
-        siou_loss = iou - (distance_cost + shape_cost) / 2
-        # clamp到合理范围 [0, 2]，防止极端值
-        siou_loss = siou_loss.clamp(0, 2)
-        return siou_loss  # SIoU
+
+        return iou - (distance_cost + shape_cost) / 2  # SIoU
     if CIoU or DIoU or GIoU:
         cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex (smallest enclosing box) width
         ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height

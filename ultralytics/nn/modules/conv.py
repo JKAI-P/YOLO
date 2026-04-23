@@ -512,28 +512,38 @@ class RepConv(nn.Module):
 
 
 class ChannelAttention(nn.Module):
-    """Channel-attention module for feature recalibration.
+    """Channel-attention module for CBAM with dual-path pooling and shared MLP.
 
-    Applies attention weights to channels based on global average pooling.
+    Applies channel attention using both average pooling and max pooling,
+    followed by a shared two-layer MLP with reduction ratio, as described in
+    the CBAM paper (Woo et al., 2018).
 
     Attributes:
-        pool (nn.AdaptiveAvgPool2d): Global average pooling.
-        fc (nn.Conv2d): Fully connected layer implemented as 1x1 convolution.
+        avg_pool (nn.AdaptiveAvgPool2d): Global average pooling.
+        max_pool (nn.AdaptiveMaxPool2d): Global max pooling.
+        mlp (nn.Sequential): Shared two-layer MLP with reduction ratio.
         act (nn.Sigmoid): Sigmoid activation for attention weights.
 
     References:
-        https://github.com/open-mmlab/mmdetection/tree/v3.0.0rc1/configs/rtmdet
+        CBAM: Convolutional Block Attention Module (Woo et al., 2018)
     """
 
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, reduction: int = 16) -> None:
         """Initialize Channel-attention module.
 
         Args:
             channels (int): Number of input channels.
+            reduction (int): Channel reduction ratio for the shared MLP.
         """
         super().__init__()
-        self.pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Conv2d(channels, channels, 1, 1, 0, bias=True)
+        mid_channels = max(channels // reduction, 1)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.mlp = nn.Sequential(
+            nn.Conv2d(channels, mid_channels, 1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, channels, 1, bias=False),
+        )
         self.act = nn.Sigmoid()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -545,7 +555,9 @@ class ChannelAttention(nn.Module):
         Returns:
             (torch.Tensor): Channel-attended output tensor.
         """
-        return x * self.act(self.fc(self.pool(x)))
+        avg_out = self.mlp(self.avg_pool(x))
+        max_out = self.mlp(self.max_pool(x))
+        return x * self.act(avg_out + max_out)
 
 
 class SpatialAttention(nn.Module):
@@ -694,7 +706,7 @@ class WeightedFuse(nn.Module):
         super().__init__()
         self.d = dimension
         self.epsilon = epsilon
-        self.weights = nn.Parameter(torch.ones(n, dtype=torch.float32))
+        self.weights = nn.Parameter(torch.ones(n, dtype=torch.float32) + torch.randn(n, dtype=torch.float32) * 0.1)
 
     def forward(self, x: list[torch.Tensor]):
         """Apply weighted fusion and concatenation to input tensors.
