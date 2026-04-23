@@ -36,12 +36,12 @@ PATIENCE = 20
 # 公共训练参数
 COMMON_ARGS = dict(
     data=DATA,
-    epochs=EPOCHS,
-    patience=PATIENCE,
+欧    epochs=1,  # 改为1个epoch用于测试
+    patience=20,
     imgsz=IMGSZ,
     batch=BATCH,
     device=DEVICE,
-    workers=8,
+    workers=0,  # 改为0避免多进程问题，更适合调试
     optimizer="SGD",
     lr0=0.01,
     lrf=0.01,
@@ -56,13 +56,15 @@ COMMON_ARGS = dict(
     mosaic=1.0,
     mixup=0.1,
     copy_paste=0.0,
-    warmup_epochs=3,
+    warmup_epochs=0,  # 测试时不需要warmup
     warmup_momentum=0.8,
     warmup_bias_lr=0.1,
-    cache="disk",
+    cache=False,  # 测试时不缓存图片
     val=True,
     plots=True,
     exist_ok=False,
+    amp=False,  # 禁用AMP检查，避免FileNotFoundError
+    verbose=True,  # 显示详细进度
 )
 
 
