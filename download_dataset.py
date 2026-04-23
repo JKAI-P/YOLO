@@ -1,22 +1,20 @@
 """
 下载无人机目标检测数据集
-尝试多个可用来源
+尝试多个可用来源.
 """
 
 import os
-import sys
-import zipfile
-import shutil
 
 DATA_DIR = "C:/Users/soldier/Desktop/ultralytics-main/datasets"
 
+
 def try_download():
-    """尝试下载"""
+    """尝试下载."""
     os.makedirs(DATA_DIR, exist_ok=True)
 
-    print("="*50)
+    print("=" * 50)
     print("无人机目标检测数据集下载")
-    print("="*50)
+    print("=" * 50)
     print()
     print("推荐以下数据集来源:")
     print()
@@ -35,8 +33,9 @@ def try_download():
     # 创建示例配置
     create_sample_config()
 
+
 def create_sample_config():
-    """创建示例YAML配置"""
+    """创建示例YAML配置."""
     yaml_path = os.path.join(DATA_DIR, "visdrone.yaml")
 
     # 如果已存在visdrone目录，使用实际路径
@@ -77,7 +76,7 @@ names:
   10: others
 """
 
-    with open(yaml_path, 'w', encoding='utf-8') as f:
+    with open(yaml_path, "w", encoding="utf-8") as f:
         f.write(yaml_content)
 
     print(f"示例配置已创建: {yaml_path}")
@@ -94,6 +93,7 @@ names:
 │   └── val/
 └── visdrone.yaml
 """)
+
 
 if __name__ == "__main__":
     try_download()
