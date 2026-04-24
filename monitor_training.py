@@ -16,13 +16,16 @@ from datetime import datetime
 # ==================== 配置参数 ====================
 # 使用glob模式动态查找最新的iyuav_det_200ep相关目录
 def find_latest_iyuav_run():
-    """查找最新的iyuav_det_200ep训练目录"""
-    pattern = "runs/detect/runs/train/iyuav_det_200ep*/results.csv"
-    csv_files = glob.glob(pattern)
+    """查找最新的iyuav-det训练目录"""
+    patterns = [
+        "runs/detect/runs/train/iyuav-det-fixed/results.csv",
+        "runs/detect/runs/train/iyuav_det_200ep*/results.csv",
+    ]
+    csv_files = []
+    for pattern in patterns:
+        csv_files.extend(glob.glob(pattern))
     if not csv_files:
         return None
-    
-    # 按修改时间排序，返回最新的
     latest_csv = max(csv_files, key=os.path.getmtime)
     return latest_csv
 
@@ -43,13 +46,13 @@ latest_iyuav_csv = find_latest_iyuav_run()
 latest_yolov8_csv = find_latest_yolov8_run()
 
 EXPERIMENTS = {
-    "IYUAV-Det (200ep)": latest_iyuav_csv if latest_iyuav_csv else "runs/detect/runs/train/iyuav_det_200ep/results.csv",
+    "IYUAV-Det Fixed (150ep)": latest_iyuav_csv if latest_iyuav_csv else "runs/detect/runs/train/iyuav-det-fixed/results.csv",
     "YOLOv8 Baseline (150ep)": latest_yolov8_csv if latest_yolov8_csv else "runs/detect/runs/train/yolov8_baseline_150ep/results.csv",
 }
 
 # 不同实验的不同总epochs数
 TOTAL_EPOCHS_CONFIG = {
-    "IYUAV-Det (200ep)": 200,
+    "IYUAV-Det Fixed (150ep)": 150,
     "YOLOv8 Baseline (150ep)": 150,
 }
 
@@ -151,11 +154,11 @@ def main():
             all_complete = True
             for name, csv_path in EXPERIMENTS.items():
                 # 动态更新路径（每次循环都检查最新路径）
-                if "iyuav_det_200ep" in str(csv_path):
+                if "iyuav" in str(csv_path).lower():
                     latest_csv = find_latest_iyuav_run()
                     if latest_csv:
                         csv_path = latest_csv
-                elif "yolov8_baseline_150ep" in str(csv_path):
+                elif "baseline" in str(csv_path).lower():
                     latest_csv = find_latest_yolov8_run()
                     if latest_csv:
                         csv_path = latest_csv
@@ -227,9 +230,9 @@ def main():
         print("\n📁 结果保存位置:")
         for name, csv_path in EXPERIMENTS.items():
             # 显示实际使用的路径
-            if "iyuav_det_200ep" in str(csv_path):
+            if "iyuav" in str(csv_path).lower():
                 actual_path = find_latest_iyuav_run()
-            elif "yolov8_baseline_150ep" in str(csv_path):
+            elif "baseline" in str(csv_path).lower():
                 actual_path = find_latest_yolov8_run()
             else:
                 actual_path = csv_path
