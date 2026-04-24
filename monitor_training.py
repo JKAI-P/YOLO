@@ -1,245 +1,297 @@
 """
-YOLO训练实时监控脚本
-定期读取训练结果CSV文件，输出进度和mAP指标对比
+YOLO消融实验训练 + 监控脚本
+自动串行执行多组消融实验，支持断点续训，同时记录日志
 
 用法：
-    python monitor_training.py
+    python monitor_training.py           # 启动训练+监控
+    python monitor_training.py --monitor # 仅监控（不启动训练）
 """
 
 import os
+import sys
 import time
-import pandas as pd
 import glob
+import subprocess
+import signal
+import pandas as pd
 from datetime import datetime
 
+# ==================== 训练配置 ====================
+# 消融实验队列：按顺序执行，每组完成后自动启动下一组
+ABLATION_QUEUE = [
+    {
+        "name": "Ablation +CBAM",
+        "script": "train_ablation_cbam.py",
+        "csv": "runs/detect/runs/detect/ablation-cbam/results.csv",
+        "checkpoint": "runs/detect/runs/detect/ablation-cbam/weights/last.pt",
+        "total_epochs": 150,
+        "iou_type": "CIoU",
+    },
+    {
+        "name": "Ablation +CBAM +WeightedFuse",
+        "script": "train_ablation_cbam_wf.py",
+        "csv": "runs/detect/runs/detect/ablation-cbam-wf/results.csv",
+        "checkpoint": "runs/detect/runs/detect/ablation-cbam-wf/weights/last.pt",
+        "total_epochs": 150,
+        "iou_type": "CIoU",
+    },
+]
 
-# ==================== 配置参数 ====================
-# 使用glob模式动态查找最新的iyuav_det_200ep相关目录
-def find_latest_iyuav_run():
-    """查找最新的iyuav-det训练目录"""
-    patterns = [
-        "runs/detect/runs/train/iyuav-det-fixed/results.csv",
-        "runs/detect/runs/train/iyuav_det_200ep*/results.csv",
-    ]
-    csv_files = []
-    for pattern in patterns:
-        csv_files.extend(glob.glob(pattern))
-    if not csv_files:
-        return None
-    latest_csv = max(csv_files, key=os.path.getmtime)
-    return latest_csv
-
-# 使用glob模式动态查找最新的yolov8_baseline_150ep相关目录
-def find_latest_yolov8_run():
-    """查找最新的yolov8_baseline_150ep训练目录"""
-    pattern = "runs/detect/runs/train/yolov8_baseline_150ep*/results.csv"
-    csv_files = glob.glob(pattern)
-    if not csv_files:
-        return None
-    
-    # 按修改时间排序，返回最新的
-    latest_csv = max(csv_files, key=os.path.getmtime)
-    return latest_csv
-
-# 获取最新的训练结果文件路径
-latest_iyuav_csv = find_latest_iyuav_run()
-latest_yolov8_csv = find_latest_yolov8_run()
-
-EXPERIMENTS = {
-    "IYUAV-Det Fixed (150ep)": latest_iyuav_csv if latest_iyuav_csv else "runs/detect/runs/train/iyuav-det-fixed/results.csv",
-    "YOLOv8 Baseline (150ep)": latest_yolov8_csv if latest_yolov8_csv else "runs/detect/runs/train/yolov8_baseline_150ep/results.csv",
+# 已完成的实验（CSV路径）
+COMPLETED_EXPERIMENTS = {
+    "Baseline": "runs/detect/runs/train/yolov8_baseline_150ep/results.csv",
+    "IYUAV-Det (Full)": "runs/detect/runs/train/iyuav-det-fixed/results.csv",
 }
 
-# 不同实验的不同总epochs数
-TOTAL_EPOCHS_CONFIG = {
-    "IYUAV-Det Fixed (150ep)": 150,
-    "YOLOv8 Baseline (150ep)": 150,
-}
+# 监控配置
+CHECK_INTERVAL = 120  # 监控检查间隔（秒）
+STALL_THRESHOLD = 600  # 无进度超过此秒数则判定中断（秒）
+LOG_FILE = "training_monitor.log"
 
-CHECK_INTERVAL = 60  # 检查间隔（秒）
+# 当前正在训练的进程
+current_process = None
 
 
-def read_results(csv_path):
-    """读取训练结果CSV文件"""
+def log(msg):
+    """同时输出到终端和日志文件"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] {msg}"
+    print(line, flush=True)
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def read_csv_latest(csv_path):
+    """读取CSV最后一行"""
     if not os.path.exists(csv_path):
         return None
-    
     try:
         df = pd.read_csv(csv_path)
         if df.empty:
             return None
-        # 确保返回最新的数据行
-        return df.iloc[-1:].copy()  # 返回最后一行作为最新状态
-    except Exception as e:
-        print(f"⚠️  读取失败: {e}")
+        return df.iloc[-1]
+    except Exception:
         return None
 
 
-def format_time(seconds):
-    """格式化时间显示"""
-    if seconds < 60:
-        return f"{seconds:.0f}秒"
-    elif seconds < 3600:
-        return f"{seconds/60:.1f}分钟"
+def get_current_epoch(csv_path):
+    """获取当前已训练的epoch数"""
+    latest = read_csv_latest(csv_path)
+    if latest is None:
+        return 0
+    return int(latest["epoch"])
+
+
+def is_training_complete(csv_path, total_epochs):
+    """判断训练是否完成"""
+    return get_current_epoch(csv_path) >= total_epochs
+
+
+def start_training(exp):
+    """启动一组训练（支持断点续训）"""
+    checkpoint = exp["checkpoint"]
+    csv_path = exp["csv"]
+
+    # 检查是否有断点可续
+    if os.path.exists(checkpoint):
+        current_ep = get_current_epoch(csv_path)
+        log(f"发现断点 {checkpoint} (epoch {current_ep})，从断点续训")
+        cmd = [
+            sys.executable, "-c",
+            f"from ultralytics import YOLO; "
+            f"model = YOLO('{checkpoint}'); "
+            f"model.train(resume=True)"
+        ]
     else:
-        return f"{seconds/3600:.2f}小时"
+        log(f"未发现断点，从头训练: {exp['script']}")
+        cmd = [sys.executable, exp["script"]]
+
+    log(f"启动命令: {' '.join(cmd)}")
+    return subprocess.Popen(cmd, cwd="/mnt/workspace/YOLO")
 
 
-def get_experiment_status(name, csv_path):
-    """获取单个实验的状态信息"""
-    df = read_results(csv_path)
-    
-    if df is None or df.empty:
-        return {
-            "name": name,
-            "status": "未开始",
-            "current_epoch": 0,
-            "progress": 0,
-            "metrics": None
-        }
-    
-    # 获取最新epoch
-    latest = df.iloc[-1]
-    current_epoch = int(latest['epoch'])
-    total_epochs = TOTAL_EPOCHS_CONFIG.get(name, 200)  # 默认200
-    progress = (current_epoch / total_epochs) * 100
-    
-    # 提取关键指标
-    metrics = {
-        'box_loss': latest.get('train/box_loss', 0),
-        'cls_loss': latest.get('train/cls_loss', 0),
-        'dfl_loss': latest.get('train/dfl_loss', 0),
-        'precision': latest.get('metrics/precision(B)', 0),
-        'recall': latest.get('metrics/recall(B)', 0),
-        'mAP50': latest.get('metrics/mAP50(B)', 0),
-        'mAP50_95': latest.get('metrics/mAP50-95(B)', 0),
-    }
-    
-    # 判断状态
-    if current_epoch >= total_epochs:
-        status = "✅ 已完成"
-    elif current_epoch == 0:
-        status = "🔄 初始化中"
-    else:
-        status = f"🔥 训练中 ({current_epoch}/{total_epochs})"
-    
-    return {
-        "name": name,
-        "status": status,
-        "current_epoch": current_epoch,
-        "progress": progress,
-        "metrics": metrics
-    }
+def wait_for_training(exp, process):
+    """监控训练进程，检测中断并自动续训"""
+    csv_path = exp["csv"]
+    total_epochs = exp["total_epochs"]
+    last_epoch = 0
+    last_progress_time = time.time()
+
+    while True:
+        # 检查进程是否还在运行
+        retcode = process.poll()
+
+        current_ep = get_current_epoch(csv_path)
+
+        # 检查是否有进度
+        if current_ep > last_epoch:
+            last_epoch = current_ep
+            last_progress_time = time.time()
+
+        # 训练完成
+        if is_training_complete(csv_path, total_epochs):
+            log(f"✅ {exp['name']} 训练完成！最终 epoch={current_ep}")
+            return True
+
+        # 进程已退出
+        if retcode is not None:
+            if retcode == 0:
+                # 正常退出，再检查一次是否完成
+                if is_training_complete(csv_path, total_epochs):
+                    log(f"✅ {exp['name']} 训练完成！")
+                    return True
+                else:
+                    log(f"⚠️ 进程正常退出但未到目标epoch (epoch={current_ep}/{total_epochs})，尝试续训")
+            else:
+                log(f"❌ {exp['name']} 进程异常退出 (code={retcode})，epoch={current_ep}，尝试续训")
+
+            # 自动续训
+            time.sleep(5)
+            if os.path.exists(exp["checkpoint"]):
+                process = start_training(exp)
+                last_progress_time = time.time()
+                continue
+            else:
+                log(f"❌ 无断点文件，无法续训，跳过此实验")
+                return False
+
+        # 检查是否卡住（无进度超时）
+        stall_time = time.time() - last_progress_time
+        if stall_time > STALL_THRESHOLD:
+            log(f"⚠️ {exp['name']} 超过 {STALL_THRESHOLD}s 无进度，可能卡死，杀死进程并续训")
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+            time.sleep(5)
+            if os.path.exists(exp["checkpoint"]):
+                process = start_training(exp)
+                last_progress_time = time.time()
+                continue
+            else:
+                log(f"❌ 无断点文件，无法续训")
+                return False
+
+        # 打印状态
+        stall_warn = f" (⚠️ 无进度 {int(stall_time)}s)" if stall_time > 120 else ""
+        log(f"📊 {exp['name']}: epoch {current_ep}/{total_epochs} ({current_ep/total_epochs*100:.1f}%){stall_warn}")
+
+        time.sleep(CHECK_INTERVAL)
 
 
-def main():
-    print("🚀 启动YOLO训练监控")
-    print(f"📋 监控配置:")
-    print(f"   • 检查间隔: {CHECK_INTERVAL}秒")
-    print(f"   • 实验数量: {len(EXPERIMENTS)}")
-    for name, epochs in TOTAL_EPOCHS_CONFIG.items():
-        print(f"   • {name}: {epochs} epochs")
-    print(f"\n💡 提示: 按 Ctrl+C 停止监控\n")
-    
-    # 添加检查点提醒标记
-    fifty_epoch_checked = {name: False for name in EXPERIMENTS}
-    
+def print_summary():
+    """打印所有实验的最终汇总"""
+    log("\n" + "=" * 80)
+    log("📊 消融实验结果汇总")
+    log("=" * 80)
+    log(f"{'实验':<30} {'mAP@50':>10} {'mAP@50-95':>12} {'Recall':>10} {'Epoch':>8}")
+    log("-" * 80)
+
+    all_exps = {}
+    all_exps.update(COMPLETED_EXPERIMENTS)
+    for exp in ABLATION_QUEUE:
+        all_exps[exp["name"]] = exp["csv"]
+
+    for name, csv_path in all_exps.items():
+        latest = read_csv_latest(csv_path)
+        if latest is not None:
+            mAP50 = latest.get("metrics/mAP50(B)", 0)
+            mAP5095 = latest.get("metrics/mAP50-95(B)", 0)
+            recall = latest.get("metrics/recall(B)", 0)
+            epoch = int(latest.get("epoch", 0))
+            log(f"{name:<30} {mAP50:>10.4f} {mAP5095:>12.4f} {recall:>10.4f} {epoch:>8}")
+        else:
+            log(f"{name:<30} {'N/A':>10} {'N/A':>12} {'N/A':>10} {'N/A':>8}")
+
+    log("=" * 80)
+
+
+def monitor_only():
+    """仅监控模式，不启动训练"""
+    log("📋 仅监控模式（不启动训练）")
+
+    all_exps = {}
+    all_exps.update(COMPLETED_EXPERIMENTS)
+    for exp in ABLATION_QUEUE:
+        all_exps[exp["name"]] = exp["csv"]
+
     try:
         while True:
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f"\n{'='*100}")
-            print(f"  📊 YOLO训练实时监控 - {current_time}")
-            print(f"{'='*100}")
-            
-            all_complete = True
-            for name, csv_path in EXPERIMENTS.items():
-                # 动态更新路径（每次循环都检查最新路径）
-                if "iyuav" in str(csv_path).lower():
-                    latest_csv = find_latest_iyuav_run()
-                    if latest_csv:
-                        csv_path = latest_csv
-                elif "baseline" in str(csv_path).lower():
-                    latest_csv = find_latest_yolov8_run()
-                    if latest_csv:
-                        csv_path = latest_csv
-                
-                df = read_results(csv_path)
-                if df is None:
-                    print(f"\n🔬 {name}:")
-                    print(f"   状态: 未开始")
-                    print(f"   等待训练数据...")
-                    all_complete = False
-                    continue
-                
-                latest = df.iloc[-1]
-                epoch = int(latest['epoch'])
-                total_epochs = TOTAL_EPOCHS_CONFIG.get(name, 200)
-                progress = epoch / total_epochs * 100
-                
-                status = "🔥 训练中" if epoch < total_epochs else "✅ 完成"
-                
-                print(f"\n🔬 {name}:")
-                print(f"   状态: {status} ({epoch}/{total_epochs})")
-                print(f"   Epoch: {epoch}/{total_epochs} ({progress:.1f}%)")
-                print(f"   结果文件: {csv_path}")
-                
-                # 提取关键指标，防止KeyError
-                metrics = {
-                    'box_loss': latest.get('train/box_loss', 0),
-                    'cls_loss': latest.get('train/cls_loss', 0),
-                    'dfl_loss': latest.get('train/dfl_loss', 0),
-                    'precision': latest.get('metrics/precision(B)', 0),
-                    'recall': latest.get('metrics/recall(B)', 0),
-                    'mAP50': latest.get('metrics/mAP50(B)', 0),
-                    'mAP50_95': latest.get('metrics/mAP50-95(B)', 0),
-                }
+            log(f"\n{'='*80}")
+            log(f"📊 训练监控 - {current_time}")
+            log(f"{'='*80}")
 
-                print(f"   ┌─ 训练损失:")
-                print(f"   │  • box_loss:  {metrics['box_loss']:.4f}")
-                print(f"   │  • cls_loss:  {metrics['cls_loss']:.4f}")
-                print(f"   │  • dfl_loss:  {metrics['dfl_loss']:.4f}")
-                print(f"   └─ 验证指标:")
-                print(f"      • Precision: {metrics['precision']:.4f}")
-                print(f"      • Recall:    {metrics['recall']:.4f}")
-                print(f"      • mAP@50:    {metrics['mAP50']:.4f}  ⭐")
-                print(f"      • mAP@50-95: {metrics['mAP50_95']:.4f}  ⭐")
-                
-                if epoch < total_epochs:
-                    all_complete = False
-                
-                # 检查点提醒（50 epochs for IYUAV-Det, 50 epochs for YOLOv8）
-                check_epoch = 50
-                if epoch >= check_epoch and not fifty_epoch_checked[name]:
-                    print(f"\n🎯 🎯 🎯 重要检查点：{name} 已达到{check_epoch} epochs！")
-                    print(f"   当前mAP@50: {metrics['mAP50']:.4f}")
-                    print(f"   请评估是否继续训练到{total_epochs} epochs")
-                    print(f"   如果性能提升不明显，可以手动停止训练")
-                    fifty_epoch_checked[name] = True
-            
-            if all_complete:
-                print(f"\n🎉 所有实验已完成！")
-                break
-            
-            print(f"\n{'='*100}")
-            print(f"\n⏰ 下次更新: {CHECK_INTERVAL}秒后...\n")
-            
+            for name, csv_path in all_exps.items():
+                latest = read_csv_latest(csv_path)
+                if latest is None:
+                    log(f"  {name}: 等待数据...")
+                    continue
+                epoch = int(latest.get("epoch", 0))
+                mAP50 = latest.get("metrics/mAP50(B)", 0)
+                mAP5095 = latest.get("metrics/mAP50-95(B)", 0)
+                recall = latest.get("metrics/recall(B)", 0)
+                log(f"  {name}: epoch={epoch}, mAP50={mAP50:.4f}, mAP50-95={mAP5095:.4f}, R={recall:.4f}")
+
             time.sleep(CHECK_INTERVAL)
-    
     except KeyboardInterrupt:
-        print("\n\n👋 监控已停止")
-        print("\n📁 结果保存位置:")
-        for name, csv_path in EXPERIMENTS.items():
-            # 显示实际使用的路径
-            if "iyuav" in str(csv_path).lower():
-                actual_path = find_latest_iyuav_run()
-            elif "baseline" in str(csv_path).lower():
-                actual_path = find_latest_yolov8_run()
-            else:
-                actual_path = csv_path
-            
-            abs_path = os.path.abspath(actual_path) if actual_path else csv_path
-            dir_path = os.path.dirname(abs_path)
-            print(f"   • {name}: {dir_path}/")
+        log("监控已停止")
+
+
+def main():
+    # 处理命令行参数
+    if "--monitor" in sys.argv:
+        monitor_only()
+        return
+
+    log("=" * 80)
+    log("🚀 YOLO消融实验训练启动")
+    log(f"📋 实验队列: {len(ABLATION_QUEUE)} 组")
+    for i, exp in enumerate(ABLATION_QUEUE, 1):
+        log(f"   {i}. {exp['name']} (epochs={exp['total_epochs']}, iou={exp['iou_type']})")
+    log(f"📋 已完成: {len(COMPLETED_EXPERIMENTS)} 组")
+    log(f"📋 日志文件: {LOG_FILE}")
+    log("=" * 80)
+
+    # 注册信号处理，优雅退出
+    def handle_signal(signum, frame):
+        log("收到终止信号，等待当前进程结束...")
+        if current_process and current_process.poll() is None:
+            current_process.terminate()
+        sys.exit(1)
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    # 逐组执行消融实验
+    for i, exp in enumerate(ABLATION_QUEUE, 1):
+        csv_path = exp["csv"]
+        total_epochs = exp["total_epochs"]
+
+        # 跳过已完成的实验
+        if is_training_complete(csv_path, total_epochs):
+            log(f"⏭️  [{i}/{len(ABLATION_QUEUE)}] {exp['name']} 已完成，跳过")
+            continue
+
+        log(f"\n{'='*80}")
+        log(f"🔬 [{i}/{len(ABLATION_QUEUE)}] 开始: {exp['name']}")
+        log(f"{'='*80}")
+
+        global current_process
+        current_process = start_training(exp)
+        success = wait_for_training(exp, current_process)
+
+        if success:
+            log(f"✅ {exp['name']} 完成！")
+        else:
+            log(f"❌ {exp['name']} 失败，继续下一组")
+
+    # 打印最终汇总
+    print_summary()
+    log("🎉 全部消融实验结束！")
 
 
 if __name__ == "__main__":
