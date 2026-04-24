@@ -1,6 +1,6 @@
 task: detect
 mode: train
-model: ultralytics/cfg/models/v8/yolov8-ablation-cbam-wf.yaml
+model: runs/detect/runs/detect/ablation-cbam-wf/weights/last.pt
 data: datasets/Det-Fly.v6i.yolov/data.yaml
 epochs: 150
 time: null
@@ -24,7 +24,7 @@ single_cls: false
 rect: false
 cos_lr: false
 close_mosaic: 10
-resume: false
+resume: runs/detect/runs/detect/ablation-cbam-wf/weights/last.pt
 amp: true
 fraction: 1.0
 profile: false
