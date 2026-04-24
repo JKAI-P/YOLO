@@ -1,0 +1,38 @@
+# YOLO/Ultralytics 项目迁移专用依赖清单
+# 用途：在新服务器上执行 `pip install -r requirements-migration.txt` 即可复现环境
+# 注意：此文件应与项目代码一起复制到新服务器，并在项目根目录下运行安装命令
+
+# 核心依赖（来自 pyproject.toml 的 dependencies）
+numpy>=1.23.0
+matplotlib>=3.3.0
+opencv-python>=4.6.0
+pillow>=7.1.2
+pyyaml>=5.3.1
+requests>=2.23.0
+scipy>=1.4.1
+torch>=1.8.0
+torchvision>=0.9.0
+psutil>=5.8.0
+polars>=0.20.0
+ultralytics-thop>=2.0.18
+
+# 常用可选依赖（根据项目中的 examples 和 scripts 推断需要）
+# 导出相关（ONNX, OpenVINO 等）
+onnx>=1.12.0
+onnxslim>=0.1.82
+openvino>=2024.0.0
+
+# 解决方案相关（Streamlit, Flask 等）
+shapely>=2.0.0
+streamlit>=1.29.0
+flask>=3.0.1
+
+# 训练增强（如果你的训练脚本使用了 Albumentations）
+albumentations>=1.4.6
+
+# COCO 评估指标
+faster-coco-eval>=1.6.7
+
+# 关键：以开发模式安装当前目录的 ultralytics（确保你的本地修改生效）
+# 必须放在最后，且新服务器上需有相同的项目结构
+-e .
