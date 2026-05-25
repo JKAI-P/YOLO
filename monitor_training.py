@@ -1,6 +1,6 @@
 """
 YOLO消融实验训练 + 监控脚本
-自动串行执行多组消融实验，支持断点续训，同时记录日志
+自动串行执行多组消融实验，支持断点续训，同时记录日志.
 
 用法：
     python monitor_training.py           # 启动训练+监控
@@ -8,13 +8,13 @@ YOLO消融实验训练 + 监控脚本
 """
 
 import os
+import signal
+import subprocess
 import sys
 import time
-import glob
-import subprocess
-import signal
-import pandas as pd
 from datetime import datetime
+
+import pandas as pd
 
 # ==================== 训练配置 ====================
 # 消融实验队列：按顺序执行，每组完成后自动启动下一组
@@ -53,7 +53,7 @@ current_process = None
 
 
 def log(msg):
-    """同时输出到终端和日志文件"""
+    """同时输出到终端和日志文件."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] {msg}"
     print(line, flush=True)
@@ -62,7 +62,7 @@ def log(msg):
 
 
 def read_csv_latest(csv_path):
-    """读取CSV最后一行"""
+    """读取CSV最后一行."""
     if not os.path.exists(csv_path):
         return None
     try:
@@ -75,7 +75,7 @@ def read_csv_latest(csv_path):
 
 
 def get_current_epoch(csv_path):
-    """获取当前已训练的epoch数"""
+    """获取当前已训练的epoch数."""
     latest = read_csv_latest(csv_path)
     if latest is None:
         return 0
@@ -83,12 +83,12 @@ def get_current_epoch(csv_path):
 
 
 def is_training_complete(csv_path, total_epochs):
-    """判断训练是否完成"""
+    """判断训练是否完成."""
     return get_current_epoch(csv_path) >= total_epochs
 
 
 def start_training(exp):
-    """启动一组训练（支持断点续训）"""
+    """启动一组训练（支持断点续训）."""
     checkpoint = exp["checkpoint"]
     csv_path = exp["csv"]
 
@@ -97,10 +97,9 @@ def start_training(exp):
         current_ep = get_current_epoch(csv_path)
         log(f"发现断点 {checkpoint} (epoch {current_ep})，从断点续训")
         cmd = [
-            sys.executable, "-c",
-            f"from ultralytics import YOLO; "
-            f"model = YOLO('{checkpoint}'); "
-            f"model.train(resume=True)"
+            sys.executable,
+            "-c",
+            f"from ultralytics import YOLO; model = YOLO('{checkpoint}'); model.train(resume=True)",
         ]
     else:
         log(f"未发现断点，从头训练: {exp['script']}")
@@ -111,7 +110,7 @@ def start_training(exp):
 
 
 def wait_for_training(exp, process):
-    """监控训练进程，检测中断并自动续训"""
+    """监控训练进程，检测中断并自动续训."""
     csv_path = exp["csv"]
     total_epochs = exp["total_epochs"]
     last_epoch = 0
@@ -152,7 +151,7 @@ def wait_for_training(exp, process):
                 last_progress_time = time.time()
                 continue
             else:
-                log(f"❌ 无断点文件，无法续训，跳过此实验")
+                log("❌ 无断点文件，无法续训，跳过此实验")
                 return False
 
         # 检查是否卡住（无进度超时）
@@ -172,18 +171,18 @@ def wait_for_training(exp, process):
                 last_progress_time = time.time()
                 continue
             else:
-                log(f"❌ 无断点文件，无法续训")
+                log("❌ 无断点文件，无法续训")
                 return False
 
         # 打印状态
         stall_warn = f" (⚠️ 无进度 {int(stall_time)}s)" if stall_time > 120 else ""
-        log(f"📊 {exp['name']}: epoch {current_ep}/{total_epochs} ({current_ep/total_epochs*100:.1f}%){stall_warn}")
+        log(f"📊 {exp['name']}: epoch {current_ep}/{total_epochs} ({current_ep / total_epochs * 100:.1f}%){stall_warn}")
 
         time.sleep(CHECK_INTERVAL)
 
 
 def print_summary():
-    """打印所有实验的最终汇总"""
+    """打印所有实验的最终汇总."""
     log("\n" + "=" * 80)
     log("📊 消融实验结果汇总")
     log("=" * 80)
@@ -210,7 +209,7 @@ def print_summary():
 
 
 def monitor_only():
-    """仅监控模式，不启动训练"""
+    """仅监控模式，不启动训练."""
     log("📋 仅监控模式（不启动训练）")
 
     all_exps = {}
@@ -221,9 +220,9 @@ def monitor_only():
     try:
         while True:
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log(f"\n{'='*80}")
+            log(f"\n{'=' * 80}")
             log(f"📊 训练监控 - {current_time}")
-            log(f"{'='*80}")
+            log(f"{'=' * 80}")
 
             for name, csv_path in all_exps.items():
                 latest = read_csv_latest(csv_path)
@@ -276,9 +275,9 @@ def main():
             log(f"⏭️  [{i}/{len(ABLATION_QUEUE)}] {exp['name']} 已完成，跳过")
             continue
 
-        log(f"\n{'='*80}")
+        log(f"\n{'=' * 80}")
         log(f"🔬 [{i}/{len(ABLATION_QUEUE)}] 开始: {exp['name']}")
-        log(f"{'='*80}")
+        log(f"{'=' * 80}")
 
         global current_process
         current_process = start_training(exp)
