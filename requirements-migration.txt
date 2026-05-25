@@ -19,7 +19,7 @@ ultralytics-thop>=2.0.18
 # 常用可选依赖（根据项目中的 examples 和 scripts 推断需要）
 # 导出相关（ONNX, OpenVINO 等）
 onnx>=1.12.0
-onnxslim>=0.1.82
+onnxslim>=0.1.94
 openvino>=2024.0.0
 
 # 解决方案相关（Streamlit, Flask 等）
