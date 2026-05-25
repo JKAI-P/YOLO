@@ -514,9 +514,8 @@ class RepConv(nn.Module):
 class ChannelAttention(nn.Module):
     """Channel-attention module for CBAM with dual-path pooling and shared MLP.
 
-    Applies channel attention using both average pooling and max pooling,
-    followed by a shared two-layer MLP with reduction ratio, as described in
-    the CBAM paper (Woo et al., 2018).
+    Applies channel attention using both average pooling and max pooling, followed by a shared two-layer MLP with
+    reduction ratio, as described in the CBAM paper (Woo et al., 2018).
 
     Attributes:
         avg_pool (nn.AdaptiveAvgPool2d): Global average pooling.
@@ -686,10 +685,9 @@ class Index(nn.Module):
 class WeightedFuse(nn.Module):
     """BiFPN-style weighted feature concatenation with learnable fusion weights.
 
-    Applies fast normalized fusion from BiFPN: each input branch is multiplied by a
-    learnable weight (kept non-negative via ReLU), then normalized and concatenated.
-    This replaces simple Concat with weighted concatenation for better multi-scale
-    feature fusion.
+    Applies fast normalized fusion from BiFPN: each input branch is multiplied by a learnable weight (kept non-negative
+    via ReLU), then normalized and concatenated. This replaces simple Concat with weighted concatenation for better
+    multi-scale feature fusion.
 
     References:
         EfficientDet: Scalable and Efficient Object Detection (Tan et al., 2020)
